@@ -59,6 +59,7 @@ const CMD_SCRIPT_DIFF: &str = "diff";
 const CMD_INFO: &str = "info";
 const CMD_INFO_SHOW: &str = "show";
 const CMD_INFO_EXTRACT: &str = "extract";
+const CMD_INFO_JSON: &str = "json";
 const CMD_INFO_IMPORT: &str = "import";
 const CMD_INFO_EDIT: &str = "edit";
 const CMD_INFO_DIFF: &str = "diff";
@@ -113,6 +114,13 @@ fn handle_command(matches: ArgMatches) -> io::Result<ExitCode> {
                 let info = info_gather(&expanded_path)?;
                 println!("{}", info)?;
                 Ok(ExitCode::SUCCESS)
+            }
+            Some((CMD_INFO_JSON, sub_matches)) => {
+                let path = sub_matches.get_one::<String>("VPXPATH").map(|s| s.as_str());
+                let path = path.unwrap_or("");
+                let expanded_path = expand_path(path)?;
+                println!("extracting info for {}", expanded_path.display())?;
+                info_display_json(&expanded_path)
             }
             Some((CMD_INFO_EXTRACT, sub_matches)) => {
                 let path = sub_matches.get_one::<String>("VPXPATH").map(|s| s.as_str());
@@ -713,6 +721,14 @@ fn build_command() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new(CMD_INFO_JSON)
+                        .about("Display information from a vpx file in JSON format")
+                        .arg(
+                            arg!(<VPXPATH> "The path to the vpx file")
+                                .required(true),
+                        ),
+                )
+                .subcommand(
                     Command::new(CMD_INFO_IMPORT)
                         .about("Import information into a vpx file")
                         .arg(
@@ -1257,6 +1273,34 @@ fn write_info_json(vpx_file_path: &PathBuf, info_file_path: &PathBuf) -> io::Res
     let table_info_json = info_to_json(&table_info, &custom_info_tags);
     let info_file = File::create(info_file_path)?;
     serde_json::to_writer_pretty(info_file, &table_info_json)?;
+    Ok(())
+}
+
+fn info_display_json(vpx_file_path: &PathBuf) -> io::Result<ExitCode> {
+    let info_file_path = vpx_file_path.with_extension("info.json");
+    if info_file_path.exists() {
+        let confirmed = confirm(
+            format!("File \"{}\" already exists", info_file_path.display()),
+            "Do you want to overwrite the existing file?".to_string(),
+        )?;
+        if !confirmed {
+            println!("Aborted")?;
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+    display_info_json(vpx_file_path, &info_file_path)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn display_info_json(vpx_file_path: &PathBuf) -> io::Result<()> {
+    let mut vpx_file = vpx::open(vpx_file_path)?;
+    let table_info = vpx_file.read_tableinfo()?;
+    let custom_info_tags = vpx_file.read_custominfotags()?;
+    let table_info_json = info_to_json(&table_info, &custom_info_tags);
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, &table_info_json)?;
+    handle.flush()?;
     Ok(())
 }
 
